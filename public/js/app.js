@@ -713,34 +713,42 @@ function showAddSessionModal() {
     </div>
     <div class="form-group">
       <label class="form-label">Title</label>
-      <input class="form-input" id="new-sess-title" placeholder="e.g. Lecture, Lab, Tutorial">
+      <input class="form-input" id="new-sess-title" placeholder="e.g. Lecture">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Start Date & Time</label>
-        <input class="form-input" type="datetime-local" id="new-sess-start">
+        <label class="form-label">First Day of Class</label>
+        <input class="form-input" type="date" id="new-sess-start-date">
       </div>
       <div class="form-group">
-        <label class="form-label">End Date & Time</label>
-        <input class="form-input" type="datetime-local" id="new-sess-end">
+        <label class="form-label">Last Day of Class</label>
+        <input class="form-input" type="date" id="new-sess-end-date">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Time (optional)</label>
+        <input class="form-input" type="time" id="new-sess-time">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Location (optional)</label>
+        <input class="form-input" id="new-sess-location" placeholder="e.g. Room 101">
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Location (optional)</label>
-      <input class="form-input" id="new-sess-location" placeholder="e.g. Room 101">
+      <label class="form-label">Repeat on Days</label>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px" id="new-sess-days">
+        <label><input type="checkbox" value="1"> Mon</label>
+        <label><input type="checkbox" value="2"> Tue</label>
+        <label><input type="checkbox" value="3"> Wed</label>
+        <label><input type="checkbox" value="4"> Thu</label>
+        <label><input type="checkbox" value="5"> Fri</label>
+        <label><input type="checkbox" value="6"> Sat</label>
+        <label><input type="checkbox" value="0"> Sun</label>
+      </div>
+      <span class="form-hint" style="display:block;margin-top:6px">Select days of the week to automatically generate sessions between the First and Last Day. Leave completely unchecked to simply create a single session on the First Day.</span>
     </div>
-    <div class="form-group">
-      <label class="form-label">Repeat Weekly</label>
-      <select class="form-select" id="new-sess-repeat">
-        <option value="0">No repeat</option>
-        <option value="2">2 weeks</option>
-        <option value="4">4 weeks</option>
-        <option value="8">8 weeks</option>
-        <option value="12">12 weeks</option>
-        <option value="16">16 weeks</option>
-      </select>
-    </div>
-    <div style="text-align:right;margin-top:16px">
+    <div style="text-align:right;margin-top:20px">
       <button class="btn btn-primary" onclick="createSessions()">Create Sessions</button>
     </div>
   `);
@@ -748,20 +756,60 @@ function showAddSessionModal() {
 
 async function createSessions() {
   const title = document.getElementById('new-sess-title').value;
-  const start = document.getElementById('new-sess-start').value;
-  const end = document.getElementById('new-sess-end').value;
+  const startDateVal = document.getElementById('new-sess-start-date').value;
+  const endDateVal = document.getElementById('new-sess-end-date').value;
+  const timeVal = document.getElementById('new-sess-time').value;
   const location = document.getElementById('new-sess-location').value;
-  const repeat = parseInt(document.getElementById('new-sess-repeat').value);
 
-  if (!title || !start) { toast('Title and start time are required', 'error'); return; }
+  const dayChecks = document.querySelectorAll('#new-sess-days input:checked');
+  const selectedDays = Array.from(dayChecks).map(cb => parseInt(cb.value));
+
+  if (!title || !startDateVal) { toast('Title and First Day are required', 'error'); return; }
+
+  // Add T00:00:00 to parse in local timezone safely
+  const start = new Date(startDateVal + "T00:00:00");
+  const end = endDateVal ? new Date(endDateVal + "T00:00:00") : new Date(start);
+
+  if (end < start) { toast('Last Day must be on or after First Day', 'error'); return; }
+
+  let hrs = 0, mins = 0;
+  if (timeVal) {
+    const parts = timeVal.split(':');
+    hrs = parseInt(parts[0]);
+    mins = parseInt(parts[1]);
+  }
 
   const sessions = [];
-  for (let i = 0; i <= repeat; i++) {
-    const s = new Date(start);
-    const e = end ? new Date(end) : new Date(start);
-    s.setDate(s.getDate() + i * 7);
-    e.setDate(e.getDate() + i * 7);
-    sessions.push({ title, start_time: s.toISOString(), end_time: e.toISOString(), location });
+  const tempDate = new Date(start);
+
+  while (tempDate <= end) {
+    // If no days are selected, just create one session on the start date and break
+    if (selectedDays.length === 0 && tempDate.getTime() > start.getTime()) {
+      break;
+    }
+
+    if (selectedDays.length === 0 || selectedDays.includes(tempDate.getDay())) {
+      const sessStart = new Date(tempDate);
+      sessStart.setHours(hrs, mins, 0, 0);
+
+      const sessEnd = new Date(sessStart);
+      // Default end time to 1 hour later for standard bounds, 
+      // though the user just clicks the session when it's time
+      sessEnd.setHours(hrs + 1, mins, 0, 0);
+
+      sessions.push({
+        title,
+        start_time: sessStart.toISOString(),
+        end_time: sessEnd.toISOString(),
+        location
+      });
+    }
+    tempDate.setDate(tempDate.getDate() + 1);
+  }
+
+  if (sessions.length === 0) {
+    toast('No sessions matched the selected days in that date range', 'warning');
+    return;
   }
 
   try {
