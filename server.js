@@ -185,14 +185,16 @@ app.post('/api/config', requireInstructor, async (req, res) => {
             name, canvas_api_token, canvas_api_url,
             calendar_sync, grading_enabled, grading_mode,
             grading_points, grading_total_sessions,
+            per_absence_value, per_absence_type,
             rules, statuses
         } = req.body;
 
         // Upsert course
         const result = await pool.query(`
       INSERT INTO courses (canvas_course_id, name, canvas_api_token, canvas_api_url, calendar_sync,
-        grading_enabled, grading_mode, grading_points, grading_total_sessions, statuses, configured)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+        grading_enabled, grading_mode, grading_points, grading_total_sessions,
+        per_absence_value, per_absence_type, statuses, configured)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
       ON CONFLICT (canvas_course_id) DO UPDATE SET
         name = COALESCE($2, courses.name),
         canvas_api_token = COALESCE($3, courses.canvas_api_token),
@@ -202,13 +204,16 @@ app.post('/api/config', requireInstructor, async (req, res) => {
         grading_mode = $7,
         grading_points = $8,
         grading_total_sessions = $9,
-        statuses = COALESCE($10, courses.statuses),
+        per_absence_value = $10,
+        per_absence_type = $11,
+        statuses = COALESCE($12, courses.statuses),
         configured = true,
         updated_at = NOW()
       RETURNING *
     `, [courseId, name || 'My Course', canvas_api_token, canvas_api_url || 'https://canvas.instructure.com/api/v1',
-            calendar_sync || false, grading_enabled || false, grading_mode || 'proportional',
+            calendar_sync || false, grading_enabled || false, grading_mode || 'per_absence',
             grading_points || 100, grading_total_sessions || 0,
+            per_absence_value || 0, per_absence_type || 'points',
             statuses ? JSON.stringify(statuses) : '["Present","Absent","Late","Excused"]'
         ]);
 

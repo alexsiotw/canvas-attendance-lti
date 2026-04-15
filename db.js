@@ -25,6 +25,8 @@ async function initDatabase() {
         grading_mode VARCHAR(50) DEFAULT 'proportional',
         grading_points NUMERIC DEFAULT 100,
         grading_total_sessions INTEGER DEFAULT 0,
+        per_absence_value NUMERIC DEFAULT 0,
+        per_absence_type VARCHAR(20) DEFAULT 'points',
         assignment_id VARCHAR(255),
         calendar_locked BOOLEAN DEFAULT false,
         statuses TEXT DEFAULT '["Present","Absent","Late","Excused"]',
@@ -105,6 +107,15 @@ async function initDatabase() {
         expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '24 hours'
       );
     `);
+
+    // Migrations for existing databases
+    try {
+      await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_value NUMERIC DEFAULT 0`);
+      await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_type VARCHAR(20) DEFAULT 'points'`);
+    } catch (migErr) {
+      console.log('Migration note:', migErr.message);
+    }
+
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);

@@ -174,7 +174,11 @@ async function renderSetup() {
           <div class="form-group">
             <label class="form-label">Grading Mode</label>
             <div id="grading-modes">
-              <div class="grading-mode-card ${config.grading_mode === 'proportional' || !config.grading_mode ? 'selected' : ''}" onclick="selectGradingMode('proportional')">
+              <div class="grading-mode-card ${config.grading_mode === 'per_absence' || !config.grading_mode ? 'selected' : ''}" onclick="selectGradingMode('per_absence')">
+                <div class="grading-mode-title">⚡ Per-Absence Deduction</div>
+                <div class="grading-mode-desc">Start at max points, deduct a set amount for each absence</div>
+              </div>
+              <div class="grading-mode-card ${config.grading_mode === 'proportional' ? 'selected' : ''}" onclick="selectGradingMode('proportional')">
                 <div class="grading-mode-title">📐 Proportional</div>
                 <div class="grading-mode-desc">Score = (sessions attended ÷ sessions taught) × max points</div>
               </div>
@@ -195,10 +199,32 @@ async function renderSetup() {
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Points Value</label>
+              <label class="form-label">Attendance Assignment Points</label>
               <input class="form-input" type="number" id="cfg-points" value="${config.grading_points || 100}" min="0">
+              <span class="form-hint">Max points for the attendance assignment in Canvas</span>
             </div>
-            <div class="form-group" id="total-sessions-group" style="display:${config.grading_mode === 'raw_points' ? 'block' : 'none'}">
+          </div>
+
+          <div id="per-absence-section" style="display:${config.grading_mode === 'per_absence' || !config.grading_mode ? 'block' : 'none'}">
+            <div class="card-title" style="margin-bottom:12px">⚡ Deduction Per Absence</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Deduct</label>
+                <input class="form-input" type="number" id="cfg-per-absence-value" value="${config.per_absence_value || 5}" min="0" step="0.5">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Type</label>
+                <select class="form-select" id="cfg-per-absence-type">
+                  <option value="points" ${(config.per_absence_type || 'points') === 'points' ? 'selected' : ''}>Points per absence</option>
+                  <option value="percent" ${config.per_absence_type === 'percent' ? 'selected' : ''}>% of total per absence</option>
+                </select>
+              </div>
+            </div>
+            <span class="form-hint" style="display:block;margin-top:4px">Example: If set to 5 points and a student has 3 absences, their grade = ${config.grading_points || 100} − 15 = ${(config.grading_points || 100) - 15} points</span>
+          </div>
+
+          <div id="total-sessions-group" style="display:${config.grading_mode === 'raw_points' ? 'block' : 'none'}">
+            <div class="form-group">
               <label class="form-label">Total Sessions</label>
               <input class="form-input" type="number" id="cfg-total-sessions" value="${config.grading_total_sessions || 0}" min="0">
               <span class="form-hint">Number of sessions for full attendance</span>
@@ -225,7 +251,7 @@ async function renderSetup() {
       </div>
     </div>`;
 
-  window._selectedGradingMode = config.grading_mode || 'proportional';
+  window._selectedGradingMode = config.grading_mode || 'per_absence';
   window._ruleCount = rules.length;
 }
 
@@ -249,6 +275,8 @@ function selectGradingMode(mode) {
   document.querySelectorAll('.grading-mode-card').forEach(c => c.classList.remove('selected'));
   event.currentTarget.classList.add('selected');
 
+  const perAbsEl = document.getElementById('per-absence-section');
+  if (perAbsEl) perAbsEl.style.display = mode === 'per_absence' ? 'block' : 'none';
   document.getElementById('rules-section').style.display =
     ['rule_percentage', 'rule_absolute'].includes(mode) ? 'block' : 'none';
   document.getElementById('total-sessions-group').style.display =
@@ -281,9 +309,11 @@ async function saveConfig() {
     canvas_api_token: document.getElementById('cfg-api-token').value,
     calendar_sync: document.getElementById('cfg-calendar').checked,
     grading_enabled: document.getElementById('cfg-grading').checked,
-    grading_mode: window._selectedGradingMode || 'proportional',
+    grading_mode: window._selectedGradingMode || 'per_absence',
     grading_points: parseFloat(document.getElementById('cfg-points').value) || 100,
     grading_total_sessions: parseInt(document.getElementById('cfg-total-sessions')?.value) || 0,
+    per_absence_value: parseFloat(document.getElementById('cfg-per-absence-value')?.value) || 0,
+    per_absence_type: document.getElementById('cfg-per-absence-type')?.value || 'points',
     rules
   };
 

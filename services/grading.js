@@ -84,6 +84,28 @@ class GradingEngine {
         return Math.round((attended / totalSessions) * maxPoints * 100) / 100;
     }
 
+    // Per-Absence Deduction: start at max_points, deduct per_absence_value for each absence
+    // per_absence_type can be 'points' (deduct fixed points) or 'percent' (deduct % of max)
+    static async calculatePerAbsence(studentId, courseId, maxPoints, perAbsenceValue, perAbsenceType) {
+        const absResult = await pool.query(`
+      SELECT COUNT(*) as absences FROM attendance a
+      JOIN sessions s ON a.session_id = s.id
+      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Absent'
+    `, [studentId, courseId]);
+        const absences = parseInt(absResult.rows[0].absences);
+
+        let grade;
+        if (perAbsenceType === 'percent') {
+            // Each absence deducts X% of max points
+            const totalDeduction = absences * parseFloat(perAbsenceValue);
+            grade = maxPoints - (maxPoints * totalDeduction / 100);
+        } else {
+            // Each absence deducts X points
+            grade = maxPoints - (absences * parseFloat(perAbsenceValue));
+        }
+        return Math.max(0, Math.round(grade * 100) / 100);
+    }
+
     static async calculateGrade(studentId, courseId) {
         const courseResult = await pool.query(
             'SELECT * FROM courses WHERE id = $1', [courseId]
@@ -92,6 +114,11 @@ class GradingEngine {
         const course = courseResult.rows[0];
 
         switch (course.grading_mode) {
+            case 'per_absence':
+                return this.calculatePerAbsence(studentId, courseId,
+                    parseFloat(course.grading_points),
+                    parseFloat(course.per_absence_value || 0),
+                    course.per_absence_type || 'points');
             case 'proportional':
                 return this.calculateProportional(studentId, courseId, parseFloat(course.grading_points));
             case 'rule_percentage':
