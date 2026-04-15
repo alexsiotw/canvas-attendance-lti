@@ -560,9 +560,17 @@ async function renderSessions() {
         </div>
       </div>
 
-      <div class="view-toggle" style="margin-bottom:20px">
-        <button class="view-toggle-btn active" onclick="setSessionView('grid',this)">Grid</button>
-        <button class="view-toggle-btn" onclick="setSessionView('list',this)">List</button>
+      <div class="view-toggle" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <button class="view-toggle-btn active" onclick="setSessionView('grid',this)">Grid</button>
+          <button class="view-toggle-btn" onclick="setSessionView('list',this)">List</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="selectAllSessions" onchange="toggleAllSessions(this)"> Select All
+          </label>
+          <button class="btn btn-danger btn-sm" id="btn-delete-selected" style="display:none" onclick="bulkDeleteSessions()">Delete Selected</button>
+        </div>
       </div>
 
       <div id="sessions-container">
@@ -580,10 +588,11 @@ async function renderSessions() {
             <div class="card">
               <div class="table-wrapper">
                 <table>
-                  <thead><tr><th>Title</th><th>Date</th><th>Time</th><th>Location</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Sel</th><th>Title</th><th>Date</th><th>Time</th><th>Location</th><th>Actions</th></tr></thead>
                   <tbody>
                     ${sessions.map(s => `
                       <tr>
+                        <td><input type="checkbox" class="session-checkbox" value="${s.id}" onchange="toggleSessionSelect()"></td>
                         <td style="font-weight:500">${s.title}</td>
                         <td>${formatDate(s.start_time)}</td>
                         <td>${formatTime(s.start_time)} – ${formatTime(s.end_time)}</td>
@@ -613,10 +622,13 @@ async function renderSessions() {
 
 function sessionCardHTML(s) {
   return `
-    <div class="session-card" onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')">
-      <div class="session-date">${formatDate(s.start_time)} • ${formatTime(s.start_time)}</div>
-      <div class="session-title">${s.title}</div>
-      ${s.location ? `<div style="font-size:12px;color:var(--text-muted)">📍 ${s.location}</div>` : ''}
+    <div class="session-card" style="display:flex; gap:12px; align-items:flex-start">
+      <input type="checkbox" class="session-checkbox" value="${s.id}" onchange="toggleSessionSelect()" style="margin-top:4px">
+      <div onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')" style="flex-grow:1; cursor:pointer;">
+        <div class="session-date">${formatDate(s.start_time)} • ${formatTime(s.start_time)}</div>
+        <div class="session-title">${s.title}</div>
+        ${s.location ? `<div style="font-size:12px;color:var(--text-muted)">📍 ${s.location}</div>` : ''}
+      </div>
     </div>`;
 }
 
@@ -882,6 +894,27 @@ async function deleteSession(id) {
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
+window.toggleAllSessions = function (el) {
+  const cbs = document.querySelectorAll('.session-checkbox');
+  cbs.forEach(cb => cb.checked = el.checked);
+  toggleSessionSelect();
+}
+
+window.toggleSessionSelect = function () {
+  const anyChecked = document.querySelectorAll('.session-checkbox:checked').length > 0;
+  document.getElementById('btn-delete-selected').style.display = anyChecked ? 'inline-block' : 'none';
+}
+
+window.bulkDeleteSessions = async function () {
+  const ids = Array.from(document.querySelectorAll('.session-checkbox:checked')).map(cb => parseInt(cb.value));
+  if (!confirm(`Delete ${ids.length} selected session(s)? This will also delete attendance records.`)) return;
+  try {
+    await api('/api/sessions/bulk-delete', { method: 'POST', body: { ids } });
+    toast(`Deleted ${ids.length} session(s)`, 'info');
+    navigate('sessions');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
 async function syncSessions() {
   toast('Syncing sessions from Canvas calendar...', 'info');
   try {
@@ -906,6 +939,9 @@ async function renderCodes() {
       <div>
         <h1 class="page-title">🎫 Attendance Codes</h1>
         <p class="page-subtitle">Generate codes for students to self-register attendance</p>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-success btn-sm" onclick="syncGradesToCanvas()">🔄 Sync Grades</button>
       </div>
     </div>
 

@@ -454,6 +454,17 @@ app.delete('/api/sessions/:id', requireInstructor, async (req, res) => {
     }
 });
 
+app.post('/api/sessions/bulk-delete', requireInstructor, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0) return res.json({ success: true });
+        await pool.query('DELETE FROM sessions WHERE id = ANY($1)', [ids]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Sync sessions from Canvas calendar
 app.post('/api/sessions/sync', requireInstructor, async (req, res) => {
     try {
@@ -617,7 +628,7 @@ app.get('/api/codes', requireAuth, async (req, res) => {
       SELECT c.*, s.title as session_title, s.start_time
       FROM attendance_codes c
       JOIN sessions s ON c.session_id = s.id
-      WHERE s.course_id = $1 AND c.active = true
+      WHERE s.course_id = $1 AND c.active = true AND c.expires_at > NOW()
       ORDER BY s.start_time ASC
     `, [course.id]);
         res.json(result.rows);
