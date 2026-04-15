@@ -44,20 +44,27 @@ app.post('/lti/launch', (req, res) => {
             console.log('LTI validation skipped/failed, proceeding with request body');
         }
 
-        const userId = req.body.user_id || req.body.custom_canvas_user_id || 'demo_user';
+        const userId = req.body.user_id || 'demo_user';
+        const canvasUserId = req.body.custom_canvas_user_id || '';
         const courseId = req.body.custom_canvas_course_id || req.body.context_id || 'demo_course';
         const userName = req.body.lis_person_name_full || 'Instructor';
+        const userEmail = req.body.lis_person_contact_email_primary || '';
         const roles = req.body.roles || '';
         const isInstructor = roles.includes('Instructor') || roles.includes('Administrator') || roles.includes('urn:lti:role:ims/lis/Instructor');
 
         req.session.lti = {
             userId,
+            canvasUserId,
             courseId,
             userName,
+            userEmail,
             role: isInstructor ? 'instructor' : 'student',
             outcomeUrl: req.body.lis_outcome_service_url || '',
             sourcedId: req.body.lis_result_sourcedid || ''
         };
+
+        // Log LTI params for debugging
+        console.log('LTI Launch:', { userId, canvasUserId, courseId, userName, role: isInstructor ? 'instructor' : 'student' });
 
         if (isInstructor) {
             res.redirect('/');
@@ -576,11 +583,21 @@ app.post('/api/codes/verify', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Code has expired' });
         }
 
-        // Find student
-        const student = await pool.query(
-            'SELECT id FROM students WHERE canvas_user_id = $1', [userId]
-        );
-        if (student.rows.length === 0) {
+        // Find student by multiple possible IDs
+        const canvasUserId = req.session.lti.canvasUserId || '';
+        const userEmail = req.session.lti.userEmail || '';
+
+        let student = null;
+        if (canvasUserId) {
+            student = (await pool.query('SELECT id FROM students WHERE canvas_user_id = $1', [canvasUserId])).rows[0];
+        }
+        if (!student) {
+            student = (await pool.query('SELECT id FROM students WHERE canvas_user_id = $1', [userId])).rows[0];
+        }
+        if (!student && userEmail) {
+            student = (await pool.query('SELECT id FROM students WHERE email = $1', [userEmail])).rows[0];
+        }
+        if (!student) {
             return res.status(404).json({ error: 'Student not found in this course' });
         }
 
@@ -839,10 +856,46 @@ app.get('/api/student/sessions', requireAuth, async (req, res) => {
     try {
         const courseId = req.session.lti.courseId;
         const userId = req.session.lti.userId;
+        const canvasUserId = req.session.lti.canvasUserId || '';
+        const userName = req.session.lti.userName;
+        const userEmail = req.session.lti.userEmail || '';
         const course = await getCourse(courseId);
         if (!course) return res.json([]);
 
-        const student = (await pool.query('SELECT * FROM students WHERE canvas_user_id = $1', [userId])).rows[0];
+        // Try to find student by multiple possible IDs
+        let student = null;
+
+        // Try canvas_user_id match (from Canvas API sync)
+        if (canvasUserId) {
+            student = (await pool.query('SELECT * FROM students WHERE canvas_user_id = $1', [canvasUserId])).rows[0];
+        }
+        // Try LTI user_id match
+        if (!student) {
+            student = (await pool.query('SELECT * FROM students WHERE canvas_user_id = $1', [userId])).rows[0];
+        }
+        // Try email match as fallback
+        if (!student && userEmail) {
+            student = (await pool.query('SELECT * FROM students WHERE email = $1', [userEmail])).rows[0];
+        }
+
+        // Auto-create student if not found (they launched via LTI so they're real)
+        if (!student && course) {
+            const stuResult = await pool.query(`
+                INSERT INTO students (canvas_user_id, name, sortable_name, email)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (canvas_user_id) DO UPDATE SET name=$2, email=$4
+                RETURNING *
+            `, [canvasUserId || userId, userName, userName, userEmail]);
+            student = stuResult.rows[0];
+        }
+
+        // Auto-enroll in course if not already
+        if (student && course) {
+            await pool.query(`
+                INSERT INTO enrollments (course_id, student_id)
+                VALUES ($1, $2) ON CONFLICT DO NOTHING
+            `, [course.id, student.id]);
+        }
 
         const sessions = (await pool.query(`
       SELECT s.*,
