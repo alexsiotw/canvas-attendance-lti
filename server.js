@@ -14,6 +14,9 @@ const GradingEngine = require('./services/grading');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy for Render.com (must be before session middleware)
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -28,10 +31,23 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Trust proxy for Render.com
-app.set('trust proxy', 1);
+// Allow Canvas to iframe the app
+app.use((req, res, next) => {
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.instructure.com https://*.canvas.com");
+    next();
+});
+
+// Protect instructor pages — students can't access index.html directly
+app.get('/', (req, res, next) => {
+    if (req.session.lti && req.session.lti.role === 'student') {
+        return res.redirect('/student.html');
+    }
+    next();
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ============== LTI LAUNCH ==============
 app.post('/lti/launch', (req, res) => {
