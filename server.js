@@ -900,6 +900,58 @@ app.get('/api/reports/export', requireAuth, async (req, res) => {
     }
 });
 
+app.post('/api/grades/sync-canvas', requireInstructor, async (req, res) => {
+    try {
+        const courseId = req.session.lti.courseId;
+        const course = await getCourse(courseId);
+
+        if (!course) return res.status(404).json({ error: 'Course not found' });
+        if (!course.grading_enabled) return res.status(400).json({ error: 'Grading is not enabled for this course' });
+        if (!course.canvas_api_token) return res.status(400).json({ error: 'Canvas API token is missing. Please add it in Attendance Setup.' });
+
+        const api = new CanvasAPI(course.canvas_api_url || 'https://canvas.instructure.com/api/v1', course.canvas_api_token);
+
+        // 1. Create or ensure assignment exists
+        let assignmentId = course.assignment_id;
+        if (!assignmentId) {
+            try {
+                const assignment = await api.createAssignment(courseId, 'Attendance', parseFloat(course.grading_points) || 100);
+                assignmentId = assignment.id;
+                await pool.query('UPDATE courses SET assignment_id = $1 WHERE id = $2', [assignmentId, course.id]);
+            } catch (createErr) {
+                return res.status(500).json({ error: 'Failed to create assignment in Canvas: ' + createErr.message });
+            }
+        }
+
+        // 2. Get all students and calculate grades
+        const students = await pool.query('SELECT s.* FROM students s JOIN enrollments e ON s.id = e.student_id WHERE e.course_id = $1', [course.id]);
+
+        let synced = 0;
+        for (const s of students.rows) {
+            if (!s.canvas_user_id) continue;
+
+            // LTI test accounts or demo students might not exist in Canvas API
+            if (s.canvas_user_id.startsWith('dev_') || isNaN(parseInt(s.canvas_user_id))) {
+                continue;
+            }
+
+            const grade = await GradingEngine.calculateGrade(s.id, course.id);
+            try {
+                await api.submitGrade(courseId, assignmentId, s.canvas_user_id, grade);
+                synced++;
+            } catch (gradeErr) {
+                console.error(`Failed to push grade for ${s.name} (${s.canvas_user_id}):`, gradeErr.message);
+                // If assignment was deleted in Canvas but we still have an ID, we could clear it here,
+                // but for now we just log and skip this student.
+            }
+        }
+
+        res.json({ success: true, synced, total: students.rows.length });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ============== STUDENT PORTAL ==============
 app.get('/api/student/sessions', requireAuth, async (req, res) => {
     try {
