@@ -17,8 +17,8 @@ class GradingEngine {
     `, [studentId, courseId]);
 
         const { attended, taught } = result.rows[0];
-        if (parseInt(taught) === 0) return maxPoints;
-        return Math.round((parseInt(attended) / parseInt(taught)) * maxPoints * 100) / 100;
+        if (parseFloat(taught || 0) === 0) return maxPoints;
+        return Math.round((parseFloat(attended || 0) / parseFloat(taught)) * maxPoints * 100) / 100;
     }
 
     // Rule-Based Percentage Penalty: check absences against rules, apply % penalty to total grade
