@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: canvas-attendance-lti
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: LTI_KEY
+        sync: false
+      - key: LTI_SECRET
+        sync: false
+      - key: CANVAS_API_URL
+        sync: false
+      - key: CANVAS_API_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production

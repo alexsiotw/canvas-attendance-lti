@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Canvas LTI Attendance Tool - Record, manage, and report student attendance">
+  <title>Attendance | Canvas LTI</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="app-container" id="app">
+    <!-- Top Bar -->
+    <div class="top-bar">
+      <div class="logo">
+        <div class="logo-icon">📋</div>
+        <span>Attendance</span>
+      </div>
+      <div class="user-info">
+        <span id="user-name"></span>
+        <a class="setup-link" onclick="navigate('setup')">⚙ Attendance Setup</a>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="nav-bar" id="nav-bar">
+      <a class="nav-item active" data-page="students" onclick="navigate('students')">Students</a>
+      <a class="nav-item" data-page="sessions" onclick="navigate('sessions')">Sessions</a>
+      <a class="nav-item" data-page="codes" onclick="navigate('codes')">Codes</a>
+      <a class="nav-item" data-page="reports" onclick="navigate('reports')">Reports</a>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content" id="content">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal-content"></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

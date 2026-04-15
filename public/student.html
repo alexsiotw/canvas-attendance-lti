@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Attendance | Student Portal</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+
+<body>
+    <div class="app-container" id="app">
+        <div class="top-bar">
+            <div class="logo">
+                <div class="logo-icon">📋</div>
+                <span>My Attendance</span>
+            </div>
+            <div class="user-info">
+                <span id="student-name"></span>
+            </div>
+        </div>
+        <div class="main-content" id="content">
+            <div class="spinner"></div>
+        </div>
+    </div>
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentUser = null;
+
+        async function api(url, opts = {}) {
+            const res = await fetch(url, {
+                ...opts,
+                headers: { 'Content-Type': 'application/json', ...opts.headers },
+                body: opts.body ? JSON.stringify(opts.body) : undefined
+            });
+            return res.json();
+        }
+
+        function toast(msg, type = 'info') {
+            const c = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            t.className = `toast ${type}`;
+            t.textContent = msg;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 3500);
+        }
+
+        function formatDate(d) {
+            return new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+
+        async function init() {
+            try {
+                currentUser = await api('/api/me');
+                document.getElementById('student-name').textContent = currentUser.userName;
+                await renderPortal();
+            } catch (e) {
+                document.getElementById('content').innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">🔒</div>
+            <div class="empty-text">Please launch from Canvas</div>
+            <div class="empty-hint">This page must be accessed through your Canvas course.<br>
+              <a href="/dev-student" class="setup-link" style="margin-top:12px;display:inline-block">Dev Mode →</a>
+            </div>
+          </div>`;
+            }
+        }
+
+        async function renderPortal() {
+            const data = await api('/api/student/sessions');
+            const el = document.getElementById('content');
+
+            if (!data.student) {
+                el.innerHTML = `
+          <div class="portal-hero">
+            <div class="portal-title">📋 Student Attendance</div>
+            <div class="portal-subtitle">You are not enrolled in this course yet. Contact your instructor.</div>
+          </div>`;
+                return;
+            }
+
+            // Count stats
+            let present = 0, absent = 0, late = 0, total = 0;
+            data.sessions.forEach(s => {
+                if (s.status && s.status !== 'unmarked') {
+                    total++;
+                    if (s.status === 'Present') present++;
+                    else if (s.status === 'Absent') absent++;
+                    else if (s.status === 'Late') late++;
+                }
+            });
+            const rate = total > 0 ? Math.round((present / total) * 100) : 100;
+
+            // Find sessions with active codes
+            const codeSessions = data.sessions.filter(s => s.active_code && new Date(s.code_expires) > new Date());
+
+            el.innerHTML = `
+        <div class="portal-hero">
+          <div class="portal-title">📋 My Attendance</div>
+          <div class="portal-subtitle">Welcome, ${data.student.name}</div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card info"><div class="stat-value">${rate}%</div><div class="stat-label">Attendance Rate</div></div>
+          <div class="stat-card success"><div class="stat-value">${present}</div><div class="stat-label">Present</div></div>
+          <div class="stat-card danger"><div class="stat-value">${absent}</div><div class="stat-label">Absent</div></div>
+          <div class="stat-card warning"><div class="stat-value">${late}</div><div class="stat-label">Late</div></div>
+        </div>
+
+        ${codeSessions.length > 0 ? `
+          <div class="card" style="margin-bottom:24px">
+            <div class="card-title" style="margin-bottom:16px">🎫 Enter Attendance Code</div>
+            ${codeSessions.map(s => `
+              <div style="margin-bottom:16px">
+                <div style="font-weight:500;margin-bottom:8px">${s.title} — ${formatDate(s.start_time)}</div>
+                <div class="code-input-group">
+                  <input type="text" class="code-input" id="code-${s.id}" maxlength="6" placeholder="ENTER CODE">
+                  <button class="btn btn-primary" onclick="submitCode(${s.id})">Submit</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px">📅 Session History</div>
+          <div class="table-wrapper">
+            <table>
+              <thead><tr><th>Session</th><th>Date</th><th>Status</th></tr></thead>
+              <tbody>
+                ${data.sessions.map(s => `
+                  <tr>
+                    <td>${s.title}</td>
+                    <td>${formatDate(s.start_time)}</td>
+                    <td><span class="status-badge status-${s.status || 'unmarked'}">${s.status || '—'}</span></td>
+                  </tr>
+                `).join('')}
+                ${data.sessions.length === 0 ? '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No sessions yet</td></tr>' : ''}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+        }
+
+        async function submitCode(sessionId) {
+            const input = document.getElementById(`code-${sessionId}`);
+            const code = input.value.trim();
+            if (!code) { toast('Please enter a code', 'error'); return; }
+
+            try {
+                const result = await api('/api/codes/verify', {
+                    method: 'POST',
+                    body: { code, session_id: sessionId }
+                });
+                if (result.success) {
+                    toast('Attendance recorded! ✓', 'success');
+                    setTimeout(() => renderPortal(), 1000);
+                } else {
+                    toast(result.error || 'Invalid code', 'error');
+                }
+            } catch (e) {
+                toast('Failed to submit code', 'error');
+            }
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
