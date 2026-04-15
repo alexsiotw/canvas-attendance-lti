@@ -147,6 +147,39 @@ function requireAuth(req, res, next) {
     next();
 }
 
+// Auto-absent cleanup for expired codes
+async function cleanupExpiredCodes() {
+    try {
+        const expiredCodes = (await pool.query('SELECT * FROM attendance_codes WHERE active = true AND expires_at <= NOW()')).rows;
+        for (const c of expiredCodes) {
+            // mark unmarked students as Absent for this session
+            await pool.query(`
+                UPDATE attendance 
+                SET status = 'Absent' 
+                WHERE session_id = $1 AND status = 'unmarked'
+            `, [c.session_id]);
+
+            // Insert Absent for students enrolled but with no record yet
+            await pool.query(`
+                INSERT INTO attendance (session_id, student_id, status)
+                SELECT $1, student_id FROM enrollments e
+                WHERE e.course_id = $2
+                  AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.session_id = $1 AND a.student_id = e.student_id)
+            `, [c.session_id, (await pool.query('SELECT course_id FROM sessions WHERE id = $1', [c.session_id])).rows[0].course_id]);
+
+            // mark code inactive
+            await pool.query('UPDATE attendance_codes SET active = false WHERE id = $1', [c.id]);
+        }
+    } catch (err) {
+        console.error('Error cleaning up expired codes:', err.message);
+    }
+}
+
+app.use('/api', async (req, res, next) => {
+    await cleanupExpiredCodes();
+    next();
+});
+
 function requireInstructor(req, res, next) {
     if (!req.session.lti || req.session.lti.role !== 'instructor') {
         return res.status(403).json({ error: 'Instructor access required' });
@@ -596,15 +629,19 @@ app.get('/api/codes', requireAuth, async (req, res) => {
 app.post('/api/codes/:sessionId/generate', requireInstructor, async (req, res) => {
     try {
         const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const expiresAt = req.body.expires_at || new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        const onTimeMins = parseInt(req.body.on_time_minutes) || 5;
+        const lateMins = parseInt(req.body.late_minutes) || 0;
+
+        const lateAt = new Date(Date.now() + onTimeMins * 60 * 1000).toISOString();
+        const expiresAt = new Date(Date.now() + (onTimeMins + lateMins) * 60 * 1000).toISOString();
 
         // Deactivate old codes
         await pool.query('UPDATE attendance_codes SET active = false WHERE session_id = $1', [req.params.sessionId]);
 
         const result = await pool.query(`
-      INSERT INTO attendance_codes (session_id, code, expires_at, active)
-      VALUES ($1, $2, $3, true) RETURNING *
-    `, [req.params.sessionId, code, expiresAt]);
+      INSERT INTO attendance_codes (session_id, code, late_at, expires_at, active)
+      VALUES ($1, $2, $3, $4, true) RETURNING *
+    `, [req.params.sessionId, code, lateAt, expiresAt]);
 
         res.json(result.rows[0]);
     } catch (err) {
@@ -650,11 +687,16 @@ app.post('/api/codes/verify', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Student not found in this course' });
         }
 
+        let status = 'Present';
+        if (codeRecord.late_at && new Date(codeRecord.late_at) < new Date()) {
+            status = 'Late';
+        }
+
         await pool.query(`
       INSERT INTO attendance (session_id, student_id, status, recorded_by, recorded_at)
-      VALUES ($1, $2, 'Present', 'self', NOW())
-      ON CONFLICT (session_id, student_id) DO UPDATE SET status='Present', recorded_by='self', recorded_at=NOW()
-    `, [session_id, student.id]);
+      VALUES ($1, $2, $3, 'self', NOW())
+      ON CONFLICT (session_id, student_id) DO UPDATE SET status=$3, recorded_by='self', recorded_at=NOW()
+    `, [session_id, student.id, status]);
 
         res.json({ success: true, message: 'Attendance recorded!' });
     } catch (err) {

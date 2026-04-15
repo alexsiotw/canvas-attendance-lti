@@ -916,6 +916,7 @@ async function renderCodes() {
           <div class="code-display">
             <div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px">${c.session_title} — ${formatDateTime(c.start_time)}</div>
             <div class="code-value">${c.code}</div>
+            ${c.late_at ? `<div class="code-expires" style="color:var(--warning)">On-Time until: ${formatTime(c.late_at)}</div>` : ''}
             <div class="code-expires">Expires: ${formatDateTime(c.expires_at)}</div>
           </div>
         `).join('')}
@@ -931,15 +932,26 @@ async function renderCodes() {
             ${sessions.map(s => `<option value="${s.id}">${s.title} — ${formatDateTime(s.start_time)}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Code Duration (minutes)</label>
-          <select class="form-select" id="code-duration">
-            <option value="10">10 minutes</option>
-            <option value="15">15 minutes</option>
-            <option value="30" selected>30 minutes</option>
-            <option value="60">1 hour</option>
-            <option value="120">2 hours</option>
-          </select>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">On-Time Duration</label>
+            <select class="form-select" id="code-ontime">
+              <option value="5">5 minutes</option>
+              <option value="10" selected>10 minutes</option>
+              <option value="15">15 minutes</option>
+              <option value="30">30 minutes</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Late Duration</label>
+            <select class="form-select" id="code-late">
+              <option value="0">Disabled (No late credit)</option>
+              <option value="5">5 minutes after On-Time</option>
+              <option value="10">10 minutes after On-Time</option>
+              <option value="20" selected>20 minutes after On-Time</option>
+              <option value="60">1 hour after On-Time</option>
+            </select>
+          </div>
         </div>
         <button class="btn btn-primary" onclick="generateCode()">Generate Code</button>
       `}
@@ -948,11 +960,14 @@ async function renderCodes() {
 
 async function generateCode() {
   const sessionId = document.getElementById('code-session').value;
-  const minutes = parseInt(document.getElementById('code-duration').value);
-  const expiresAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+  const onTimeMins = parseInt(document.getElementById('code-ontime').value);
+  const lateMins = parseInt(document.getElementById('code-late').value);
 
   try {
-    const result = await api(`/api/codes/${sessionId}/generate`, { method: 'POST', body: { expires_at: expiresAt } });
+    const result = await api(`/api/codes/${sessionId}/generate`, {
+      method: 'POST',
+      body: { on_time_minutes: onTimeMins, late_minutes: lateMins }
+    });
     toast('✓ Code generated!', 'success');
     navigate('codes');
   } catch (e) { toast('Error: ' + e.message, 'error'); }

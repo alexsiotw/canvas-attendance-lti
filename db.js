@@ -89,6 +89,7 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
         code VARCHAR(10) NOT NULL,
+        late_at TIMESTAMP,
         expires_at TIMESTAMP,
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW()
@@ -112,6 +113,7 @@ async function initDatabase() {
     try {
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_value NUMERIC DEFAULT 0`);
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_type VARCHAR(20) DEFAULT 'points'`);
+      await client.query(`ALTER TABLE attendance_codes ADD COLUMN IF NOT EXISTS late_at TIMESTAMP`);
     } catch (migErr) {
       console.log('Migration note:', migErr.message);
     }

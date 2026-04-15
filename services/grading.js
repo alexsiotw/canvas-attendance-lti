@@ -5,9 +5,10 @@ class GradingEngine {
     static async calculateProportional(studentId, courseId, maxPoints) {
         const result = await pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM attendance a
+        (SELECT SUM(CASE WHEN a.status = 'Present' THEN 1 WHEN a.status = 'Late' THEN 0.75 ELSE 0 END) 
+         FROM attendance a
          JOIN sessions s ON a.session_id = s.id
-         WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Present'
+         WHERE a.student_id = $1 AND s.course_id = $2 AND a.status != 'unmarked'
         ) as attended,
         (SELECT COUNT(*) FROM attendance a
          JOIN sessions s ON a.session_id = s.id
@@ -23,11 +24,12 @@ class GradingEngine {
     // Rule-Based Percentage Penalty: check absences against rules, apply % penalty to total grade
     static async calculateRuleBasedPercentage(studentId, courseId) {
         const absResult = await pool.query(`
-      SELECT COUNT(*) as absences FROM attendance a
+      SELECT SUM(CASE WHEN a.status = 'Absent' THEN 1 WHEN a.status = 'Late' THEN 0.25 ELSE 0 END) as absences 
+      FROM attendance a
       JOIN sessions s ON a.session_id = s.id
-      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Absent'
+      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status IN ('Absent', 'Late')
     `, [studentId, courseId]);
-        const absences = parseInt(absResult.rows[0].absences);
+        const absences = parseFloat(absResult.rows[0].absences || 0);
 
         const rulesResult = await pool.query(`
       SELECT * FROM grading_rules WHERE course_id = $1 ORDER BY min_absences ASC
@@ -49,11 +51,12 @@ class GradingEngine {
     // Rule-Based Absolute Points Penalty: check absences against rules, deduct points
     static async calculateRuleBasedAbsolute(studentId, courseId, basePoints) {
         const absResult = await pool.query(`
-      SELECT COUNT(*) as absences FROM attendance a
+      SELECT SUM(CASE WHEN a.status = 'Absent' THEN 1 WHEN a.status = 'Late' THEN 0.25 ELSE 0 END) as absences 
+      FROM attendance a
       JOIN sessions s ON a.session_id = s.id
-      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Absent'
+      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status IN ('Absent', 'Late')
     `, [studentId, courseId]);
-        const absences = parseInt(absResult.rows[0].absences);
+        const absences = parseFloat(absResult.rows[0].absences || 0);
 
         const rulesResult = await pool.query(`
       SELECT * FROM grading_rules WHERE course_id = $1 ORDER BY min_absences ASC
@@ -74,12 +77,13 @@ class GradingEngine {
     // Raw Points by Session Attended: (attended / total_sessions) * max_points
     static async calculateRawPoints(studentId, courseId, totalSessions, maxPoints) {
         const result = await pool.query(`
-      SELECT COUNT(*) as attended FROM attendance a
+      SELECT SUM(CASE WHEN a.status = 'Present' THEN 1 WHEN a.status = 'Late' THEN 0.75 ELSE 0 END) as attended 
+      FROM attendance a
       JOIN sessions s ON a.session_id = s.id
-      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Present'
+      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status IN ('Present', 'Late')
     `, [studentId, courseId]);
 
-        const attended = parseInt(result.rows[0].attended);
+        const attended = parseFloat(result.rows[0].attended || 0);
         if (totalSessions === 0) return 0;
         return Math.round((attended / totalSessions) * maxPoints * 100) / 100;
     }
@@ -88,11 +92,12 @@ class GradingEngine {
     // per_absence_type can be 'points' (deduct fixed points) or 'percent' (deduct % of max)
     static async calculatePerAbsence(studentId, courseId, maxPoints, perAbsenceValue, perAbsenceType) {
         const absResult = await pool.query(`
-      SELECT COUNT(*) as absences FROM attendance a
+      SELECT SUM(CASE WHEN a.status = 'Absent' THEN 1 WHEN a.status = 'Late' THEN 0.25 ELSE 0 END) as absences 
+      FROM attendance a
       JOIN sessions s ON a.session_id = s.id
-      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status = 'Absent'
+      WHERE a.student_id = $1 AND s.course_id = $2 AND a.status IN ('Absent', 'Late')
     `, [studentId, courseId]);
-        const absences = parseInt(absResult.rows[0].absences);
+        const absences = parseFloat(absResult.rows[0].absences || 0);
 
         let grade;
         if (perAbsenceType === 'percent') {
