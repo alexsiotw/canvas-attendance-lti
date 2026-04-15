@@ -49,6 +49,34 @@ app.get('/', (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ============== LTI XML CONFIGURATION ==============
+app.get('/lti/config.xml', (req, res) => {
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<cartridge_basiclti_link xmlns="http://www.imsglobal.org/xsd/imslticc_v1p0"
+    xmlns:blti="http://www.imsglobal.org/xsd/imsbasiclti_v1p0"
+    xmlns:lticm="http://www.imsglobal.org/xsd/imslticm_v1p0"
+    xmlns:lticp="http://www.imsglobal.org/xsd/imslticp_v1p0"
+    xmlns:canvas="http://canvas.instructure.com/lti/course_navigation">
+  <blti:title>Attendance</blti:title>
+  <blti:description>Track and manage student attendance with codes, grading, and reports.</blti:description>
+  <blti:launch_url>${baseUrl}/lti/launch</blti:launch_url>
+  <blti:extensions platform="canvas.instructure.com">
+    <lticm:property name="privacy_level">public</lticm:property>
+    <lticm:property name="domain">${new URL(baseUrl).host}</lticm:property>
+    <lticm:options name="course_navigation">
+      <lticm:property name="enabled">true</lticm:property>
+      <lticm:property name="text">Attendance</lticm:property>
+      <lticm:property name="visibility">public</lticm:property>
+      <lticm:property name="default">enabled</lticm:property>
+      <lticm:property name="windowTarget">_self</lticm:property>
+    </lticm:options>
+  </blti:extensions>
+</cartridge_basiclti_link>`;
+    res.set('Content-Type', 'application/xml');
+    res.send(xml);
+});
+
 // ============== LTI LAUNCH ==============
 app.post('/lti/launch', (req, res) => {
     const consumerKey = process.env.LTI_KEY || 'attendance-lti-key';
