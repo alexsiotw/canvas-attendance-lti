@@ -605,7 +605,7 @@ app.post('/api/codes/verify', requireAuth, async (req, res) => {
       INSERT INTO attendance (session_id, student_id, status, recorded_by, recorded_at)
       VALUES ($1, $2, 'Present', 'self', NOW())
       ON CONFLICT (session_id, student_id) DO UPDATE SET status='Present', recorded_by='self', recorded_at=NOW()
-    `, [session_id, student.rows[0].id]);
+    `, [session_id, student.id]);
 
         res.json({ success: true, message: 'Attendance recorded!' });
     } catch (err) {
