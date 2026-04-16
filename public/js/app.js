@@ -547,18 +547,34 @@ async function renderSessions() {
 
   try {
     const sessions = await api('/api/sessions');
+    const codes = await api('/api/codes');
 
     content.innerHTML = `
       <div class="page-header">
         <div>
-          <h1 class="page-title">Sessions</h1>
-          <p class="page-subtitle">${sessions.length} sessions</p>
+          <h1 class="page-title">Class Sessions</h1>
+          <p class="page-subtitle">${sessions.length} sessions available</p>
         </div>
         <div class="btn-group">
+          <button class="btn btn-success btn-sm" onclick="syncGradesToCanvas()">🔄 Sync Grades</button>
           <button class="btn btn-secondary btn-sm" onclick="syncSessions()">🔄 Sync Calendar</button>
           <button class="btn btn-primary btn-sm" onclick="showAddSessionModal()">+ Add Sessions</button>
         </div>
       </div>
+
+      ${codes.length > 0 ? `
+        <div style="margin-bottom:24px">
+          <div class="card-title" style="margin-bottom:12px">Active Attendance Codes</div>
+          ${codes.map(c => `
+            <div class="code-display" style="padding:20px; margin: 10px 0;">
+              <div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px">${c.session_title} — ${formatDateTime(c.start_time)}</div>
+              <div class="code-value" style="font-size:36px; letter-spacing:6px">${c.code}</div>
+              ${c.late_at ? `<div class="code-expires" style="color:var(--warning)">On-Time until: ${formatTime(c.late_at)}</div>` : ''}
+              <div class="code-expires">Expires: ${formatDateTime(c.expires_at)}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
 
       <div class="view-toggle" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
         <div>
@@ -599,6 +615,7 @@ async function renderSessions() {
                         <td style="color:var(--text-muted)">${s.location || '—'}</td>
                         <td>
                           <div class="btn-group">
+                            <button class="btn btn-primary btn-xs" onclick="openGenerateCodeModal(${s.id})">Generate Code</button>
                             <button class="btn btn-secondary btn-xs" onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')">Attendance</button>
                             <button class="btn btn-secondary btn-xs" onclick="showEditSessionModal(${s.id})">Edit</button>
                             <button class="btn btn-danger btn-xs" onclick="deleteSession(${s.id})">Delete</button>
@@ -624,10 +641,13 @@ function sessionCardHTML(s) {
   return `
     <div class="session-card" style="display:flex; gap:12px; align-items:flex-start">
       <input type="checkbox" class="session-checkbox" value="${s.id}" onchange="toggleSessionSelect()" style="margin-top:4px">
-      <div onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')" style="flex-grow:1; cursor:pointer;">
-        <div class="session-date">${formatDate(s.start_time)} • ${formatTime(s.start_time)}</div>
-        <div class="session-title">${s.title}</div>
-        ${s.location ? `<div style="font-size:12px;color:var(--text-muted)">📍 ${s.location}</div>` : ''}
+      <div style="flex-grow:1;">
+        <div onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')" style="cursor:pointer; margin-bottom:8px">
+          <div class="session-date">${formatDate(s.start_time)} • ${formatTime(s.start_time)}</div>
+          <div class="session-title">${s.title}</div>
+          ${s.location ? `<div style="font-size:12px;color:var(--text-muted)">📍 ${s.location}</div>` : ''}
+        </div>
+        <button class="btn btn-primary btn-xs" style="width:100%; justify-content:center" onclick="openGenerateCodeModal(${s.id})">Generate Code</button>
       </div>
     </div>`;
 }
@@ -928,84 +948,50 @@ async function syncSessions() {
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
-// ============== CODES PAGE ==============
-async function renderCodes() {
-  const content = document.getElementById('content');
-  const sessions = await api('/api/sessions');
-  const codes = await api('/api/codes');
-
-  content.innerHTML = `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">🎫 Attendance Codes</h1>
-        <p class="page-subtitle">Generate codes for students to self-register attendance</p>
+// ============== CODES PAGE (DEPRECATED FOR UI, logic moved) ==============
+function openGenerateCodeModal(sessionId) {
+  showModal(`
+    <div class="modal-header">
+      <div class="modal-title">Generate Attendance Code</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">On-Time Duration</label>
+        <select class="form-select" id="code-ontime">
+          <option value="5">5 minutes</option>
+          <option value="10" selected>10 minutes</option>
+          <option value="15">15 minutes</option>
+          <option value="30">30 minutes</option>
+        </select>
       </div>
-      <div class="btn-group">
-        <button class="btn btn-success btn-sm" onclick="syncGradesToCanvas()">🔄 Sync Grades</button>
+      <div class="form-group">
+        <label class="form-label">Late Duration</label>
+        <select class="form-select" id="code-late">
+          <option value="0">Disabled (No late credit)</option>
+          <option value="5">5 minutes after On-Time</option>
+          <option value="10">10 minutes after On-Time</option>
+          <option value="20" selected>20 minutes after On-Time</option>
+          <option value="60">1 hour after On-Time</option>
+        </select>
       </div>
     </div>
-
-    ${codes.length > 0 ? `
-      <div style="margin-bottom:24px">
-        <div class="card-title" style="margin-bottom:12px">Active Codes</div>
-        ${codes.map(c => `
-          <div class="code-display">
-            <div style="font-size:14px;color:var(--text-secondary);margin-bottom:8px">${c.session_title} — ${formatDateTime(c.start_time)}</div>
-            <div class="code-value">${c.code}</div>
-            ${c.late_at ? `<div class="code-expires" style="color:var(--warning)">On-Time until: ${formatTime(c.late_at)}</div>` : ''}
-            <div class="code-expires">Expires: ${formatDateTime(c.expires_at)}</div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-
-    <div class="card">
-      <div class="card-title" style="margin-bottom:16px">Generate New Code</div>
-      ${sessions.length === 0 ? `<p style="color:var(--text-muted)">No sessions available. Add sessions first.</p>` : `
-        <div class="form-group">
-          <label class="form-label">Select Session</label>
-          <select class="form-select" id="code-session">
-            ${sessions.map(s => `<option value="${s.id}">${s.title} — ${formatDateTime(s.start_time)}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">On-Time Duration</label>
-            <select class="form-select" id="code-ontime">
-              <option value="5">5 minutes</option>
-              <option value="10" selected>10 minutes</option>
-              <option value="15">15 minutes</option>
-              <option value="30">30 minutes</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Late Duration</label>
-            <select class="form-select" id="code-late">
-              <option value="0">Disabled (No late credit)</option>
-              <option value="5">5 minutes after On-Time</option>
-              <option value="10">10 minutes after On-Time</option>
-              <option value="20" selected>20 minutes after On-Time</option>
-              <option value="60">1 hour after On-Time</option>
-            </select>
-          </div>
-        </div>
-        <button class="btn btn-primary" onclick="generateCode()">Generate Code</button>
-      `}
-    </div>`;
+    <button class="btn btn-primary" style="width:100%" onclick="generateCodeFromModal(${sessionId})">Generate Code</button>
+  `);
 }
 
-async function generateCode() {
-  const sessionId = document.getElementById('code-session').value;
+async function generateCodeFromModal(sessionId) {
   const onTimeMins = parseInt(document.getElementById('code-ontime').value);
   const lateMins = parseInt(document.getElementById('code-late').value);
 
   try {
-    const result = await api(`/api/codes/${sessionId}/generate`, {
+    await api(`/api/codes/${sessionId}/generate`, {
       method: 'POST',
       body: { on_time_minutes: onTimeMins, late_minutes: lateMins }
     });
     toast('✓ Code generated!', 'success');
-    navigate('codes');
+    closeModal();
+    navigate('sessions'); // Instead of navigation to 'codes', just reload sessions
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
