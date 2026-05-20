@@ -574,7 +574,7 @@ async function renderSessions() {
           <p class="page-subtitle">${sessions.length} sessions available</p>
         </div>
         <div class="btn-group">
-          ${config.grading_enabled ? `
+          ${courseConfig && courseConfig.grading_enabled ? `
           <button class="btn btn-primary btn-sm" onclick="syncGrades()">📤 Sync Grades</button>
           ` : ''}<button class="btn btn-secondary btn-sm" onclick="syncSessions()">🔄 Sync Calendar</button>
           <button class="btn btn-primary btn-sm" onclick="showAddSessionModal()">+ Add Sessions</button>
