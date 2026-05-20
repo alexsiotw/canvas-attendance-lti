@@ -117,6 +117,8 @@ async function initDatabase() {
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS moodle_api_url TEXT`);
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS moodle_course_id INTEGER`);
       await client.query(`ALTER TABLE attendance_codes ADD COLUMN IF NOT EXISTS late_at TIMESTAMP`);
+      await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS lis_result_sourcedid TEXT`);
+      await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS lis_outcome_service_url TEXT`);
     } catch (migErr) {
       console.log('Migration note:', migErr.message);
     }

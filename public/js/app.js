@@ -574,10 +574,9 @@ async function renderSessions() {
           <p class="page-subtitle">${sessions.length} sessions available</p>
         </div>
         <div class="btn-group">
-          ${currentUser.platform === 'moodle' ? '' : `
-          <button class="btn btn-success btn-sm" onclick="syncGradesToCanvas()">🔄 Sync Grades</button>
-          <button class="btn btn-secondary btn-sm" onclick="syncSessions()">🔄 Sync Calendar</button>
-          `}
+          ${config.grading_enabled ? `
+          <button class="btn btn-primary btn-sm" onclick="syncGrades()">📤 Sync Grades</button>
+          ` : ''}<button class="btn btn-secondary btn-sm" onclick="syncSessions()">🔄 Sync Calendar</button>
           <button class="btn btn-primary btn-sm" onclick="showAddSessionModal()">+ Add Sessions</button>
         </div>
       </div>
@@ -1174,10 +1173,10 @@ function exportReport(format) {
   window.open(`/api/reports/export?format=${format}`, '_blank');
 }
 
-async function syncGradesToCanvas() {
-  toast('Syncing grades to Canvas...', 'info');
+async function syncGrades() {
+  toast('Syncing grades...', 'info');
   try {
-    const result = await api('/api/grades/sync-canvas', { method: 'POST' });
+    const result = await api('/api/grades/sync', { method: 'POST' });
     if (result.success) {
       toast(`✓ Synced grades for ${result.synced}/${result.total} students`, 'success');
     } else {

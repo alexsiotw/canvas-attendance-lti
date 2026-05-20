@@ -84,7 +84,7 @@ app.post('/lti/launch', (req, res) => {
     const consumerSecret = process.env.LTI_SECRET || 'attendance-lti-secret';
 
     const provider = new lti.Provider(consumerKey, consumerSecret);
-    provider.valid_request(req, (err, isValid) => {
+    provider.valid_request(req, async (err, isValid) => {
         if (err || !isValid) {
             console.log('LTI validation skipped/failed, proceeding with request body');
         }
@@ -125,6 +125,40 @@ app.post('/lti/launch', (req, res) => {
         if (isInstructor) {
             res.redirect('/');
         } else {
+            // Silently register the student so we capture their Moodle LTI grading tokens
+            try {
+                // Ensure a course stub exists so enrollment doesn't violate foreign key constraints
+                const courseResult = await pool.query(`
+                    INSERT INTO courses (canvas_course_id, name)
+                    VALUES ($1, $2) ON CONFLICT (canvas_course_id) DO NOTHING
+                    RETURNING id
+                `, [courseId, 'LTI Course']);
+
+                let cId = courseResult.rows[0]?.id;
+                if (!cId) {
+                    cId = (await pool.query('SELECT id FROM courses WHERE canvas_course_id = $1', [courseId])).rows[0].id;
+                }
+
+                // Upsert student and capture their unique LTI grading identifiers
+                const stuResult = await pool.query(`
+                    INSERT INTO students (canvas_user_id, name, sortable_name, email, lis_outcome_service_url, lis_result_sourcedid)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (canvas_user_id) DO UPDATE SET 
+                        name = COALESCE(EXCLUDED.name, students.name),
+                        email = COALESCE(EXCLUDED.email, students.email),
+                        lis_outcome_service_url = EXCLUDED.lis_outcome_service_url,
+                        lis_result_sourcedid = EXCLUDED.lis_result_sourcedid
+                    RETURNING id
+                `, [canvasUserId, userName, userName, userEmail, req.body.lis_outcome_service_url || '', req.body.lis_result_sourcedid || '']);
+                
+                await pool.query(`
+                    INSERT INTO enrollments (course_id, student_id)
+                    VALUES ($1, $2) ON CONFLICT DO NOTHING
+                `, [cId, stuResult.rows[0].id]);
+            } catch (dbErr) {
+                console.error('Error saving student LTI launch data:', dbErr.message);
+            }
+
             res.redirect('/student.html');
         }
     });
@@ -773,22 +807,13 @@ app.post('/api/grades/calculate', requireInstructor, async (req, res) => {
     }
 });
 
-app.post('/api/grades/sync-canvas', requireInstructor, async (req, res) => {
+app.post('/api/grades/sync', requireInstructor, async (req, res) => {
     try {
         const courseId = req.session.lti.courseId;
+        const platform = req.session.lti.platform;
         const course = await getCourse(courseId);
-        if (!course || !course.canvas_api_token || !course.grading_enabled) {
-            return res.status(400).json({ error: 'Grading or Canvas API not configured' });
-        }
-
-        const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
-
-        // Create or use existing assignment
-        let assignmentId = course.assignment_id;
-        if (!assignmentId) {
-            const assignment = await api.createAssignment(courseId, 'Attendance', course.grading_points);
-            assignmentId = String(assignment.id);
-            await pool.query('UPDATE courses SET assignment_id = $1 WHERE id = $2', [assignmentId, course.id]);
+        if (!course || !course.grading_enabled) {
+            return res.status(400).json({ error: 'Grading not configured' });
         }
 
         const students = (await pool.query(`
@@ -797,13 +822,63 @@ app.post('/api/grades/sync-canvas', requireInstructor, async (req, res) => {
     `, [course.id])).rows;
 
         let synced = 0;
-        for (const s of students) {
-            const grade = await GradingEngine.calculateGrade(s.id, course.id);
-            try {
-                await api.submitGrade(courseId, assignmentId, s.canvas_user_id, grade);
-                synced++;
-            } catch (e) {
-                console.error(`Failed to sync grade for ${s.name}:`, e.message);
+
+        if (platform === 'canvas') {
+            if (!course.canvas_api_token) return res.status(400).json({ error: 'Canvas API not configured' });
+            
+            const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
+            let assignmentId = course.assignment_id;
+            if (!assignmentId) {
+                const assignment = await api.createAssignment(courseId, 'Attendance', course.grading_points);
+                assignmentId = String(assignment.id);
+                await pool.query('UPDATE courses SET assignment_id = $1 WHERE id = $2', [assignmentId, course.id]);
+            }
+
+            for (const s of students) {
+                const grade = await GradingEngine.calculateGrade(s.id, course.id);
+                try {
+                    await api.submitGrade(courseId, assignmentId, s.canvas_user_id, grade);
+                    synced++;
+                } catch (e) {
+                    console.error(`Failed to sync Canvas grade for ${s.name}:`, e.message);
+                }
+            }
+        } else if (platform === 'moodle') {
+            const consumerKey = process.env.LTI_KEY || 'attendance-lti-key';
+            const consumerSecret = process.env.LTI_SECRET || 'attendance-lti-secret';
+
+            for (const s of students) {
+                if (!s.lis_outcome_service_url || !s.lis_result_sourcedid) {
+                    console.log(`Skipping Moodle grade sync for ${s.name} - No LTI tokens found (student hasn't launched the tool).`);
+                    continue;
+                }
+
+                const grade = await GradingEngine.calculateGrade(s.id, course.id);
+                const maxPoints = course.grading_points || 100;
+                let normalizedScore = parseFloat(grade) / maxPoints;
+                if (normalizedScore > 1) normalizedScore = 1;
+                if (normalizedScore < 0) normalizedScore = 0;
+
+                try {
+                    await new Promise((resolve, reject) => {
+                        // Create a fresh provider just to get an OutcomeService instance initialized
+                        const provider = new lti.Provider(consumerKey, consumerSecret);
+                        provider.outcome_service = new lti.OutcomeService({
+                            consumer_key: consumerKey,
+                            consumer_secret: consumerSecret,
+                            service_url: s.lis_outcome_service_url,
+                            source_did: s.lis_result_sourcedid
+                        });
+
+                        provider.outcome_service.send_replace_result(normalizedScore, (err, result) => {
+                            if (err) reject(err);
+                            else resolve(result);
+                        });
+                    });
+                    synced++;
+                } catch (e) {
+                    console.error(`Failed to sync Moodle grade for ${s.name}:`, e.message);
+                }
             }
         }
 
