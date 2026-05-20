@@ -137,11 +137,16 @@ async function renderSetup() {
       </div>
 
       <div class="card" style="margin-bottom:20px">
-        <div class="card-title" style="margin-bottom:16px">🔑 Canvas API Connection</div>
+        <div class="card-title" style="margin-bottom:16px">${currentUser.platform === 'moodle' ? '🔑 LMS Setup' : '🔑 Canvas API Connection'}</div>
         <div class="form-group">
           <label class="form-label">Course Name</label>
           <input class="form-input" id="cfg-name" value="${config.name || ''}" placeholder="e.g. Biology 101">
         </div>
+        ${currentUser.platform === 'moodle' ? `
+          <div class="form-group">
+            <span class="form-hint" style="color: var(--warning);"><strong>Note:</strong> You are using Moodle. Automatic roster sync and calendar syncing are disabled because Moodle does not expose a Canvas-style API here. Let students self-register via codes or add them manually!</span>
+          </div>
+        ` : `
         <div class="form-group">
           <label class="form-label">Canvas API URL</label>
           <input class="form-input" id="cfg-api-url" value="${config.canvas_api_url || 'https://canvas.instructure.com/api/v1'}" placeholder="https://canvas.instructure.com/api/v1">
@@ -149,15 +154,13 @@ async function renderSetup() {
         </div>
         <div class="form-group">
           <label class="form-label">Canvas API Token</label>
-          <input class="form-input" type="password" id="cfg-api-token" value="${config.canvas_api_token || ''}" placeholder="Paste your Canvas API token">
-          <span class="form-hint">Generate from Canvas → Account → Settings → New Access Token</span>
+          <input class="form-input" type="password" id="cfg-api-token" value="${config.canvas_api_token || ''}" placeholder="Paste your Canvas API Token here">
+          <span class="form-hint">Used to automatically sync students and calendar events</span>
         </div>
-      </div>
-
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-title" style="margin-bottom:16px">📅 Calendar</div>
-        <label class="form-check">
-          <input type="checkbox" id="cfg-calendar" ${config.calendar_sync ? 'checked' : ''}>
+        `}
+        
+        <label class="form-group" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="cfg-calendar" ${config.calendar_sync ? 'checked' : ''} ${currentUser.platform === 'moodle' ? 'disabled' : ''}>
           <span>Pull sessions from Canvas course calendar</span>
         </label>
         <span class="form-hint" style="margin-top:6px;display:block">You can always add sessions manually regardless of this setting</span>
@@ -305,9 +308,9 @@ async function saveConfig() {
 
   const body = {
     name: document.getElementById('cfg-name').value,
-    canvas_api_url: document.getElementById('cfg-api-url').value,
-    canvas_api_token: document.getElementById('cfg-api-token').value,
-    calendar_sync: document.getElementById('cfg-calendar').checked,
+    canvas_api_url: document.getElementById('cfg-api-url')?.value || '',
+    canvas_api_token: document.getElementById('cfg-api-token')?.value || '',
+    calendar_sync: document.getElementById('cfg-calendar')?.checked || false,
     grading_enabled: document.getElementById('cfg-grading').checked,
     grading_mode: window._selectedGradingMode || 'per_absence',
     grading_points: parseFloat(document.getElementById('cfg-points').value) || 100,
@@ -349,7 +352,7 @@ async function renderStudents() {
           <p class="page-subtitle">${students.length} students enrolled</p>
         </div>
         <div class="btn-group">
-          <button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from Canvas</button>
+          ${currentUser.platform === 'moodle' ? '' : '<button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from Canvas</button>'}
           <button class="btn btn-secondary btn-sm" onclick="showAddStudentModal()">+ Add Student</button>
         </div>
       </div>
@@ -556,8 +559,10 @@ async function renderSessions() {
           <p class="page-subtitle">${sessions.length} sessions available</p>
         </div>
         <div class="btn-group">
+          ${currentUser.platform === 'moodle' ? '' : `
           <button class="btn btn-success btn-sm" onclick="syncGradesToCanvas()">🔄 Sync Grades</button>
           <button class="btn btn-secondary btn-sm" onclick="syncSessions()">🔄 Sync Calendar</button>
+          `}
           <button class="btn btn-primary btn-sm" onclick="showAddSessionModal()">+ Add Sessions</button>
         </div>
       </div>

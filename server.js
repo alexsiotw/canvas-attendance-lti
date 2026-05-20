@@ -89,12 +89,22 @@ app.post('/lti/launch', (req, res) => {
         }
 
         const userId = req.body.user_id || 'demo_user';
-        const canvasUserId = req.body.custom_canvas_user_id || '';
+        const canvasUserId = req.body.custom_canvas_user_id || req.body.user_id || '';
         const courseId = req.body.custom_canvas_course_id || req.body.context_id || 'demo_course';
-        const userName = req.body.lis_person_name_full || 'Instructor';
+        
+        let userName = req.body.lis_person_name_full;
+        if (!userName && req.body.lis_person_name_given) {
+            userName = `${req.body.lis_person_name_given} ${req.body.lis_person_name_family || ''}`.trim();
+        }
+        if (!userName) userName = 'Instructor';
+
         const userEmail = req.body.lis_person_contact_email_primary || '';
         const roles = req.body.roles || '';
         const isInstructor = roles.includes('Instructor') || roles.includes('Administrator') || roles.includes('urn:lti:role:ims/lis/Instructor');
+
+        const productFamily = (req.body.tool_consumer_info_product_family_code || '').toLowerCase();
+        const extLms = (req.body.ext_lms || '').toLowerCase();
+        const platform = (productFamily.includes('moodle') || extLms.includes('moodle') || !req.body.custom_canvas_course_id) ? 'moodle' : 'canvas';
 
         req.session.lti = {
             userId,
@@ -104,11 +114,12 @@ app.post('/lti/launch', (req, res) => {
             userEmail,
             role: isInstructor ? 'instructor' : 'student',
             outcomeUrl: req.body.lis_outcome_service_url || '',
-            sourcedId: req.body.lis_result_sourcedid || ''
+            sourcedId: req.body.lis_result_sourcedid || '',
+            platform
         };
 
         // Log LTI params for debugging
-        console.log('LTI Launch:', { userId, canvasUserId, courseId, userName, role: isInstructor ? 'instructor' : 'student' });
+        console.log('LTI Launch:', { userId, canvasUserId, courseId, userName, role: isInstructor ? 'instructor' : 'student', platform });
 
         if (isInstructor) {
             res.redirect('/');
