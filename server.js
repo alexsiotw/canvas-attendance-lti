@@ -32,10 +32,10 @@ app.use(session({
     }
 }));
 
-// Allow Canvas to iframe the app
+// Allow any LMS to iframe the app (Canvas, Moodle, etc.)
 app.use((req, res, next) => {
     res.removeHeader('X-Frame-Options');
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.instructure.com https://*.canvas.com");
+    res.setHeader('Content-Security-Policy', "frame-ancestors *");
     next();
 });
 
