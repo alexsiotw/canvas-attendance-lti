@@ -652,7 +652,8 @@ async function renderSessions() {
 
     window._allSessions = sessions;
   } catch (e) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-text">Error loading sessions</div></div>`;
+    console.error(e);
+    content.innerHTML = `<div class="empty-state"><div class="empty-text">Error loading sessions: ${e.message}</div></div>`;
   }
 }
 
