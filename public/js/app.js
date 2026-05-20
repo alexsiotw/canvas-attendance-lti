@@ -143,9 +143,21 @@ async function renderSetup() {
           <input class="form-input" id="cfg-name" value="${config.name || ''}" placeholder="e.g. Biology 101">
         </div>
         ${currentUser.platform === 'moodle' ? `
-          <div class="form-group">
-            <span class="form-hint" style="color: var(--warning);"><strong>Note:</strong> You are using Moodle. Automatic roster sync and calendar syncing are disabled because Moodle does not expose a Canvas-style API here. Let students self-register via codes or add them manually!</span>
-          </div>
+        <div class="form-group">
+          <label class="form-label">Moodle Site URL</label>
+          <input class="form-input" id="cfg-moodle-url" value="${config.moodle_api_url || ''}" placeholder="https://my-school.moodlecloud.com">
+          <span class="form-hint">Your Moodle site URL</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Moodle Web Services Token</label>
+          <input class="form-input" type="password" id="cfg-moodle-token" value="${config.moodle_api_token || ''}" placeholder="Paste your Moodle Token here">
+          <span class="form-hint">Generated in Moodle via Preferences > Security keys</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Moodle Course ID</label>
+          <input class="form-input" type="number" id="cfg-moodle-course-id" value="${config.moodle_course_id || ''}" placeholder="e.g. 4">
+          <span class="form-hint">The integer ID found in your Moodle course URL (e.g. id=4)</span>
+        </div>
         ` : `
         <div class="form-group">
           <label class="form-label">Canvas API URL</label>
@@ -310,6 +322,9 @@ async function saveConfig() {
     name: document.getElementById('cfg-name').value,
     canvas_api_url: document.getElementById('cfg-api-url')?.value || '',
     canvas_api_token: document.getElementById('cfg-api-token')?.value || '',
+    moodle_api_url: document.getElementById('cfg-moodle-url')?.value || '',
+    moodle_api_token: document.getElementById('cfg-moodle-token')?.value || '',
+    moodle_course_id: document.getElementById('cfg-moodle-course-id')?.value || '',
     calendar_sync: document.getElementById('cfg-calendar')?.checked || false,
     grading_enabled: document.getElementById('cfg-grading').checked,
     grading_mode: window._selectedGradingMode || 'per_absence',
@@ -352,7 +367,7 @@ async function renderStudents() {
           <p class="page-subtitle">${students.length} students enrolled</p>
         </div>
         <div class="btn-group">
-          ${currentUser.platform === 'moodle' ? '' : '<button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from Canvas</button>'}
+          <button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from ${currentUser.platform === 'moodle' ? 'Moodle' : 'Canvas'}</button>
           <button class="btn btn-secondary btn-sm" onclick="showAddStudentModal()">+ Add Student</button>
         </div>
       </div>
@@ -497,7 +512,7 @@ async function fillSession(sessionId, status) {
 }
 
 async function syncStudents() {
-  toast('Syncing students from Canvas...', 'info');
+  toast(`Syncing students from ${currentUser.platform === 'moodle' ? 'Moodle' : 'Canvas'}...`, 'info');
   try {
     const result = await api('/api/students/sync', { method: 'POST' });
     if (result.success) {

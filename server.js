@@ -9,6 +9,7 @@ const lti = require('ims-lti');
 const XLSX = require('xlsx');
 const { pool, initDatabase } = require('./db');
 const CanvasAPI = require('./services/canvasApi');
+const MoodleAPI = require('./services/moodleApi');
 const GradingEngine = require('./services/grading');
 
 const app = express();
@@ -227,6 +228,7 @@ app.post('/api/config', requireInstructor, async (req, res) => {
         const courseId = req.session.lti.courseId;
         const {
             name, canvas_api_token, canvas_api_url,
+            moodle_api_token, moodle_api_url, moodle_course_id,
             calendar_sync, grading_enabled, grading_mode,
             grading_points, grading_total_sessions,
             per_absence_value, per_absence_type,
@@ -235,26 +237,31 @@ app.post('/api/config', requireInstructor, async (req, res) => {
 
         // Upsert course
         const result = await pool.query(`
-      INSERT INTO courses (canvas_course_id, name, canvas_api_token, canvas_api_url, calendar_sync,
-        grading_enabled, grading_mode, grading_points, grading_total_sessions,
+      INSERT INTO courses (canvas_course_id, name, canvas_api_token, canvas_api_url,
+        moodle_api_token, moodle_api_url, moodle_course_id,
+        calendar_sync, grading_enabled, grading_mode, grading_points, grading_total_sessions,
         per_absence_value, per_absence_type, statuses, configured)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true)
       ON CONFLICT (canvas_course_id) DO UPDATE SET
         name = COALESCE($2, courses.name),
         canvas_api_token = COALESCE($3, courses.canvas_api_token),
         canvas_api_url = COALESCE($4, courses.canvas_api_url),
-        calendar_sync = $5,
-        grading_enabled = $6,
-        grading_mode = $7,
-        grading_points = $8,
-        grading_total_sessions = $9,
-        per_absence_value = $10,
-        per_absence_type = $11,
-        statuses = COALESCE($12, courses.statuses),
+        moodle_api_token = COALESCE($5, courses.moodle_api_token),
+        moodle_api_url = COALESCE($6, courses.moodle_api_url),
+        moodle_course_id = COALESCE($7, courses.moodle_course_id),
+        calendar_sync = $8,
+        grading_enabled = $9,
+        grading_mode = $10,
+        grading_points = $11,
+        grading_total_sessions = $12,
+        per_absence_value = $13,
+        per_absence_type = $14,
+        statuses = COALESCE($15, courses.statuses),
         configured = true,
         updated_at = NOW()
       RETURNING *
     `, [courseId, name || 'My Course', canvas_api_token, canvas_api_url || 'https://canvas.instructure.com/api/v1',
+            moodle_api_token, moodle_api_url, moodle_course_id ? parseInt(moodle_course_id) : null,
             calendar_sync || false, grading_enabled || false, grading_mode || 'per_absence',
             grading_points || 100, grading_total_sessions || 0,
             per_absence_value || 0, per_absence_type || 'points',
@@ -366,13 +373,26 @@ app.post('/api/students', requireInstructor, async (req, res) => {
 app.post('/api/students/sync', requireInstructor, async (req, res) => {
     try {
         const courseId = req.session.lti.courseId;
+        const platform = req.session.lti.platform;
         const course = await getCourse(courseId);
-        if (!course || !course.canvas_api_token) {
-            return res.status(400).json({ error: 'Canvas API token not configured' });
+        if (!course) {
+            return res.status(404).json({ error: 'Course not configured' });
         }
 
-        const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
-        const students = await api.getStudents(courseId);
+        let students = [];
+        if (platform === 'moodle') {
+            if (!course.moodle_api_token || !course.moodle_api_url || !course.moodle_course_id) {
+                return res.status(400).json({ error: 'Moodle API details not fully configured' });
+            }
+            const api = new MoodleAPI(course.moodle_api_url, course.moodle_api_token);
+            students = await api.getStudents(course.moodle_course_id);
+        } else {
+            if (!course.canvas_api_token) {
+                return res.status(400).json({ error: 'Canvas API token not configured' });
+            }
+            const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
+            students = await api.getStudents(courseId);
+        }
 
         for (const s of students) {
             const stuResult = await pool.query(`
