@@ -563,10 +563,13 @@ async function renderSessions() {
   const content = document.getElementById('content');
 
   try {
-    const sessions = await api('/api/sessions');
-    const codes = await api('/api/codes');
+      const sessions = await api('/api/sessions');
+      const codes = await api('/api/codes');
+      const now = new Date();
+      const upcomingSessions = sessions.filter(s => new Date(s.end_time) >= now).sort((a,b) => new Date(a.start_time) - new Date(b.start_time));
+      const pastSessions = sessions.filter(s => new Date(s.end_time) < now).sort((a,b) => new Date(b.start_time) - new Date(a.start_time));
 
-    content.innerHTML = `
+      content.innerHTML = `
       <div class="page-header">
         <div>
           <h1 class="page-title">Class Sessions</h1>
@@ -615,36 +618,52 @@ async function renderSessions() {
             <div class="empty-hint">Add sessions manually or sync from your Canvas calendar</div>
           </div>
         ` : `
-          <div class="session-grid" id="sessions-grid">
-            ${sessions.map(s => sessionCardHTML(s)).join('')}
-          </div>
-          <div id="sessions-list" style="display:none">
-            <div class="card">
-              <div class="table-wrapper">
-                <table>
-                  <thead><tr><th>Sel</th><th>Title</th><th>Date</th><th>Time</th><th>Location</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    ${sessions.map(s => `
-                      <tr>
-                        <td><input type="checkbox" class="session-checkbox" value="${s.id}" onchange="toggleSessionSelect()"></td>
-                        <td style="font-weight:500">${s.title}</td>
-                        <td>${formatDate(s.start_time)}</td>
-                        <td>${formatTime(s.start_time)} – ${formatTime(s.end_time)}</td>
-                        <td style="color:var(--text-muted)">${s.location || '—'}</td>
-                        <td>
-                          <div class="btn-group">
-                            <button class="btn btn-primary btn-xs" onclick="openGenerateCodeModal(${s.id})">Generate Code</button>
-                            <button class="btn btn-secondary btn-xs" onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')">Attendance</button>
-                            <button class="btn btn-secondary btn-xs" onclick="showEditSessionModal(${s.id})">Edit</button>
-                            <button class="btn btn-danger btn-xs" onclick="deleteSession(${s.id})">Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+          <!-- GRID VIEW -->
+          <div id="sessions-grid-wrapper">
+            ${upcomingSessions.length > 0 ? `
+              <div style="margin: 20px 0 10px 0; font-size: 15px; font-weight: bold; color: var(--accent);">Upcoming Lectures</div>
+              <div class="session-grid" style="margin-bottom: 24px;">
+                ${upcomingSessions.map(s => sessionCardHTML(s)).join('')}
               </div>
-            </div>
+            ` : ''}
+            
+            ${pastSessions.length > 0 ? `
+              <div style="margin: 20px 0 10px 0; font-size: 15px; font-weight: bold; color: var(--text-muted);">Past Lectures</div>
+              <div class="session-grid" style="opacity: 0.8;">
+                ${pastSessions.map(s => sessionCardHTML(s)).join('')}
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- LIST VIEW -->
+          <div id="sessions-list-wrapper" style="display:none">
+            ${upcomingSessions.length > 0 ? `
+              <div style="margin: 20px 0 10px 0; font-size: 15px; font-weight: bold; color: var(--accent);">Upcoming Lectures</div>
+              <div class="card" style="margin-bottom:20px">
+                <div class="table-wrapper">
+                  <table>
+                    <thead><tr><th>Sel</th><th>Title</th><th>Date</th><th>Time</th><th>Location</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      ${upcomingSessions.map(s => sessionRowHTML(s)).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ` : ''}
+
+            ${pastSessions.length > 0 ? `
+              <div style="margin: 20px 0 10px 0; font-size: 15px; font-weight: bold; color: var(--text-muted);">Past Lectures</div>
+              <div class="card" style="opacity:0.85">
+                <div class="table-wrapper">
+                  <table>
+                    <thead><tr><th>Sel</th><th>Title</th><th>Date</th><th>Time</th><th>Location</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      ${pastSessions.map(s => sessionRowHTML(s)).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ` : ''}
           </div>
         `}
       </div>`;
@@ -671,11 +690,30 @@ function sessionCardHTML(s) {
     </div>`;
 }
 
+function sessionRowHTML(s) {
+  return `
+    <tr>
+      <td><input type="checkbox" class="session-checkbox" value="${s.id}" onchange="toggleSessionSelect()"></td>
+      <td style="font-weight:500">${s.title}</td>
+      <td>${formatDate(s.start_time)}</td>
+      <td>${formatTime(s.start_time)} – ${formatTime(s.end_time)}</td>
+      <td style="color:var(--text-muted)">${s.location || '—'}</td>
+      <td>
+        <div class="btn-group">
+          <button class="btn btn-primary btn-xs" onclick="openGenerateCodeModal(${s.id})">Generate Code</button>
+          <button class="btn btn-secondary btn-xs" onclick="openSessionAttendance(${s.id},'${s.title.replace(/'/g, "\\'")}')">Attendance</button>
+          <button class="btn btn-secondary btn-xs" onclick="showEditSessionModal(${s.id})">Edit</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteSession(${s.id})">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+}
+
 function setSessionView(view, btn) {
   document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('sessions-grid').style.display = view === 'grid' ? 'grid' : 'none';
-  document.getElementById('sessions-list').style.display = view === 'list' ? 'block' : 'none';
+  document.getElementById('sessions-grid-wrapper').style.display = view === 'grid' ? 'block' : 'none';
+  document.getElementById('sessions-list-wrapper').style.display = view === 'list' ? 'block' : 'none';
 }
 
 function openSessionAttendance(sessionId, title) {
