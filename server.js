@@ -9,7 +9,6 @@ const lti = require('ims-lti');
 const XLSX = require('xlsx');
 const { pool, initDatabase } = require('./db');
 const CanvasAPI = require('./services/canvasApi');
-const MoodleAPI = require('./services/moodleApi');
 const GradingEngine = require('./services/grading');
 
 const app = express();
@@ -103,9 +102,7 @@ app.post('/lti/launch', (req, res) => {
         const roles = req.body.roles || '';
         const isInstructor = roles.includes('Instructor') || roles.includes('Administrator') || roles.includes('urn:lti:role:ims/lis/Instructor');
 
-        const productFamily = (req.body.tool_consumer_info_product_family_code || '').toLowerCase();
-        const extLms = (req.body.ext_lms || '').toLowerCase();
-        const platform = (productFamily.includes('moodle') || extLms.includes('moodle') || !req.body.custom_canvas_course_id) ? 'moodle' : 'canvas';
+        const platform = 'canvas';
 
         req.session.lti = {
             userId,
@@ -262,7 +259,6 @@ app.post('/api/config', requireInstructor, async (req, res) => {
         const courseId = req.session.lti.courseId;
         const {
             name, canvas_api_token, canvas_api_url,
-            moodle_api_token, moodle_api_url, moodle_course_id,
             calendar_sync, grading_enabled, grading_mode,
             grading_points, grading_total_sessions,
             per_absence_value, per_absence_type,
@@ -272,30 +268,25 @@ app.post('/api/config', requireInstructor, async (req, res) => {
         // Upsert course
         const result = await pool.query(`
       INSERT INTO courses (canvas_course_id, name, canvas_api_token, canvas_api_url,
-        moodle_api_token, moodle_api_url, moodle_course_id,
         calendar_sync, grading_enabled, grading_mode, grading_points, grading_total_sessions,
         per_absence_value, per_absence_type, statuses, configured)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
       ON CONFLICT (canvas_course_id) DO UPDATE SET
         name = COALESCE($2, courses.name),
         canvas_api_token = COALESCE($3, courses.canvas_api_token),
         canvas_api_url = COALESCE($4, courses.canvas_api_url),
-        moodle_api_token = COALESCE($5, courses.moodle_api_token),
-        moodle_api_url = COALESCE($6, courses.moodle_api_url),
-        moodle_course_id = COALESCE($7, courses.moodle_course_id),
-        calendar_sync = $8,
-        grading_enabled = $9,
-        grading_mode = $10,
-        grading_points = $11,
-        grading_total_sessions = $12,
-        per_absence_value = $13,
-        per_absence_type = $14,
-        statuses = COALESCE($15, courses.statuses),
+        calendar_sync = $5,
+        grading_enabled = $6,
+        grading_mode = $7,
+        grading_points = $8,
+        grading_total_sessions = $9,
+        per_absence_value = $10,
+        per_absence_type = $11,
+        statuses = COALESCE($12, courses.statuses),
         configured = true,
         updated_at = NOW()
       RETURNING *
     `, [courseId, name || 'My Course', canvas_api_token, canvas_api_url || 'https://canvas.instructure.com/api/v1',
-            moodle_api_token, moodle_api_url, moodle_course_id ? parseInt(moodle_course_id) : null,
             calendar_sync || false, grading_enabled || false, grading_mode || 'per_absence',
             grading_points || 100, grading_total_sessions || 0,
             per_absence_value || 0, per_absence_type || 'points',
@@ -403,30 +394,48 @@ app.post('/api/students', requireInstructor, async (req, res) => {
     }
 });
 
+// Delete student from course
+app.delete('/api/students/:id', requireInstructor, async (req, res) => {
+    try {
+        const courseId = req.session.lti.courseId;
+        const studentId = req.params.id;
+        const course = await getCourse(courseId);
+        if (!course) return res.status(404).json({ error: 'Course not configured' });
+
+        await pool.query('DELETE FROM enrollments WHERE course_id = $1 AND student_id = $2', [course.id, studentId]);
+        await pool.query(`
+            DELETE FROM attendance 
+            WHERE student_id = $1 AND session_id IN (
+                SELECT id FROM sessions WHERE course_id = $2
+            )
+        `, [studentId, course.id]);
+
+        const otherEnrollments = await pool.query('SELECT 1 FROM enrollments WHERE student_id = $1', [studentId]);
+        if (otherEnrollments.rowCount === 0) {
+            await pool.query('DELETE FROM students WHERE id = $1', [studentId]);
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Sync students from Canvas
 app.post('/api/students/sync', requireInstructor, async (req, res) => {
     try {
         const courseId = req.session.lti.courseId;
-        const platform = req.session.lti.platform;
         const course = await getCourse(courseId);
         if (!course) {
             return res.status(404).json({ error: 'Course not configured' });
         }
 
         let students = [];
-        if (platform === 'moodle') {
-            if (!course.moodle_api_token || !course.moodle_api_url || !course.moodle_course_id) {
-                return res.status(400).json({ error: 'Moodle API details not fully configured' });
-            }
-            const api = new MoodleAPI(course.moodle_api_url, course.moodle_api_token);
-            students = await api.getStudents(course.moodle_course_id);
-        } else {
-            if (!course.canvas_api_token) {
-                return res.status(400).json({ error: 'Canvas API token not configured' });
-            }
-            const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
-            students = await api.getStudents(courseId);
+        if (!course.canvas_api_token) {
+            return res.status(400).json({ error: 'Canvas API token not configured' });
         }
+        const api = new CanvasAPI(course.canvas_api_url, course.canvas_api_token);
+        students = await api.getStudents(courseId);
 
         for (const s of students) {
             const stuResult = await pool.query(`
@@ -841,43 +850,6 @@ app.post('/api/grades/sync', requireInstructor, async (req, res) => {
                     synced++;
                 } catch (e) {
                     console.error(`Failed to sync Canvas grade for ${s.name}:`, e.message);
-                }
-            }
-        } else if (platform === 'moodle') {
-            const consumerKey = process.env.LTI_KEY || 'attendance-lti-key';
-            const consumerSecret = process.env.LTI_SECRET || 'attendance-lti-secret';
-
-            for (const s of students) {
-                if (!s.lis_outcome_service_url || !s.lis_result_sourcedid) {
-                    console.log(`Skipping Moodle grade sync for ${s.name} - No LTI tokens found (student hasn't launched the tool).`);
-                    continue;
-                }
-
-                const grade = await GradingEngine.calculateGrade(s.id, course.id);
-                const maxPoints = course.grading_points || 100;
-                let normalizedScore = parseFloat(grade) / maxPoints;
-                if (normalizedScore > 1) normalizedScore = 1;
-                if (normalizedScore < 0) normalizedScore = 0;
-
-                try {
-                    await new Promise((resolve, reject) => {
-                        // Create a fresh provider just to get an OutcomeService instance initialized
-                        const provider = new lti.Provider(consumerKey, consumerSecret);
-                        provider.outcome_service = new lti.OutcomeService({
-                            consumer_key: consumerKey,
-                            consumer_secret: consumerSecret,
-                            service_url: s.lis_outcome_service_url,
-                            source_did: s.lis_result_sourcedid
-                        });
-
-                        provider.outcome_service.send_replace_result(normalizedScore, (err, result) => {
-                            if (err) reject(err);
-                            else resolve(result);
-                        });
-                    });
-                    synced++;
-                } catch (e) {
-                    console.error(`Failed to sync Moodle grade for ${s.name}:`, e.message);
                 }
             }
         }

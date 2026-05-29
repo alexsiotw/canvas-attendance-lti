@@ -137,28 +137,11 @@ async function renderSetup() {
       </div>
 
       <div class="card" style="margin-bottom:20px">
-        <div class="card-title" style="margin-bottom:16px">${currentUser.platform === 'moodle' ? '🔑 LMS Setup' : '🔑 Canvas API Connection'}</div>
+        <div class="card-title" style="margin-bottom:16px">🔑 Canvas API Connection</div>
         <div class="form-group">
           <label class="form-label">Course Name</label>
           <input class="form-input" id="cfg-name" value="${config.name || ''}" placeholder="e.g. Biology 101">
         </div>
-        ${currentUser.platform === 'moodle' ? `
-        <div class="form-group">
-          <label class="form-label">Moodle Site URL</label>
-          <input class="form-input" id="cfg-moodle-url" value="${config.moodle_api_url || ''}" placeholder="https://my-school.moodlecloud.com">
-          <span class="form-hint">Your Moodle site URL</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Moodle Web Services Token</label>
-          <input class="form-input" type="password" id="cfg-moodle-token" value="${config.moodle_api_token || ''}" placeholder="Paste your Moodle Token here">
-          <span class="form-hint">Generated in Moodle via Preferences > Security keys</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Moodle Course ID</label>
-          <input class="form-input" type="number" id="cfg-moodle-course-id" value="${config.moodle_course_id || ''}" placeholder="e.g. 4">
-          <span class="form-hint">The integer ID found in your Moodle course URL (e.g. id=4)</span>
-        </div>
-        ` : `
         <div class="form-group">
           <label class="form-label">Canvas API URL</label>
           <input class="form-input" id="cfg-api-url" value="${config.canvas_api_url || 'https://canvas.instructure.com/api/v1'}" placeholder="https://canvas.instructure.com/api/v1">
@@ -169,10 +152,9 @@ async function renderSetup() {
           <input class="form-input" type="password" id="cfg-api-token" value="${config.canvas_api_token || ''}" placeholder="Paste your Canvas API Token here">
           <span class="form-hint">Used to automatically sync students and calendar events</span>
         </div>
-        `}
         
         <label class="form-group" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="cfg-calendar" ${config.calendar_sync ? 'checked' : ''} ${currentUser.platform === 'moodle' ? 'disabled' : ''}>
+          <input type="checkbox" id="cfg-calendar" ${config.calendar_sync ? 'checked' : ''}>
           <span>Pull sessions from Canvas course calendar</span>
         </label>
         <span class="form-hint" style="margin-top:6px;display:block">You can always add sessions manually regardless of this setting</span>
@@ -322,9 +304,6 @@ async function saveConfig() {
     name: document.getElementById('cfg-name').value,
     canvas_api_url: document.getElementById('cfg-api-url')?.value || '',
     canvas_api_token: document.getElementById('cfg-api-token')?.value || '',
-    moodle_api_url: document.getElementById('cfg-moodle-url')?.value || '',
-    moodle_api_token: document.getElementById('cfg-moodle-token')?.value || '',
-    moodle_course_id: document.getElementById('cfg-moodle-course-id')?.value || '',
     calendar_sync: document.getElementById('cfg-calendar')?.checked || false,
     grading_enabled: document.getElementById('cfg-grading').checked,
     grading_mode: window._selectedGradingMode || 'per_absence',
@@ -367,7 +346,7 @@ async function renderStudents() {
           <p class="page-subtitle">${students.length} students enrolled</p>
         </div>
         <div class="btn-group">
-          <button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from ${currentUser.platform === 'moodle' ? 'Moodle' : 'Canvas'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="syncStudents()">🔄 Sync from Canvas</button>
           <button class="btn btn-secondary btn-sm" onclick="showAddStudentModal()">+ Add Student</button>
         </div>
       </div>
@@ -395,7 +374,10 @@ async function renderStudents() {
                   <tr>
                     <td><a style="color:var(--accent);cursor:pointer" onclick="navigate('student-detail',{studentId:${s.id}})">${s.name}</a></td>
                     <td style="color:var(--text-muted)">${s.email || '—'}</td>
-                    <td><button class="btn btn-secondary btn-xs" onclick="navigate('student-detail',{studentId:${s.id}})">View</button></td>
+                    <td>
+                      <button class="btn btn-secondary btn-xs" onclick="navigate('student-detail',{studentId:${s.id}})">View</button>
+                      <button class="btn btn-danger btn-xs" onclick="deleteStudent(${s.id}, '${s.name.replace(/'/g, "\\'")}')" style="margin-left:5px">Delete</button>
+                    </td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -512,7 +494,7 @@ async function fillSession(sessionId, status) {
 }
 
 async function syncStudents() {
-  toast(`Syncing students from ${currentUser.platform === 'moodle' ? 'Moodle' : 'Canvas'}...`, 'info');
+  toast(`Syncing students from Canvas...`, 'info');
   try {
     const result = await api('/api/students/sync', { method: 'POST' });
     if (result.success) {
@@ -554,6 +536,23 @@ async function addStudent() {
     toast('✓ Student added', 'success');
     closeModal();
     navigate('students');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function deleteStudent(studentId, studentName) {
+  if (!confirm(`Are you sure you want to delete ${studentName} from this course? This will remove all their attendance records in this course.`)) {
+    return;
+  }
+  try {
+    const result = await api(`/api/students/${studentId}`, { method: 'DELETE' });
+    if (result.success) {
+      toast('✓ Student deleted successfully', 'success');
+      navigate('students');
+    } else {
+      toast('Error: ' + (result.error || 'Failed to delete student'), 'error');
+    }
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   }
@@ -1201,7 +1200,10 @@ async function renderStudentDetail(studentId) {
     const initial = student.name ? student.name.charAt(0).toUpperCase() : '?';
 
     content.innerHTML = `
-      <button class="back-btn" onclick="navigate('students')">← Back to Students</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <button class="back-btn" onclick="navigate('students')" style="margin:0">← Back to Students</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteStudent(${student.id}, '${student.name.replace(/'/g, "\\'")}')">🗑 Delete Student</button>
+      </div>
 
       <div class="student-header">
         <div class="student-avatar">${initial}</div>

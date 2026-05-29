@@ -113,9 +113,9 @@ async function initDatabase() {
     try {
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_value NUMERIC DEFAULT 0`);
       await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS per_absence_type VARCHAR(20) DEFAULT 'points'`);
-      await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS moodle_api_token TEXT`);
-      await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS moodle_api_url TEXT`);
-      await client.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS moodle_course_id INTEGER`);
+      await client.query(`ALTER TABLE courses DROP COLUMN IF EXISTS moodle_api_token`);
+      await client.query(`ALTER TABLE courses DROP COLUMN IF EXISTS moodle_api_url`);
+      await client.query(`ALTER TABLE courses DROP COLUMN IF EXISTS moodle_course_id`);
       await client.query(`ALTER TABLE attendance_codes ADD COLUMN IF NOT EXISTS late_at TIMESTAMP`);
       await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS lis_result_sourcedid TEXT`);
       await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS lis_outcome_service_url TEXT`);
